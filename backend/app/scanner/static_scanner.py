@@ -8,7 +8,7 @@ import re
 import ast
 import logging
 from dataclasses import dataclass
-from scan import PatternMatch
+from .scan import PatternMatch
 
 logger = logging.getLogger(__name__)
 

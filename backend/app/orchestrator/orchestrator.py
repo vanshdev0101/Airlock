@@ -8,9 +8,9 @@ Orchestrates a full repo scan:
 
 import logging
 from datetime import datetime, timezone
-from fetcher import RepoFetcher
-from static_scanner import StaticScanner, calculate_trust_score
-from scan import ScanResult, ScanResponse, TrustLevel, PatternMatch
+from ..fetcher import RepoFetcher
+from ..scanner import StaticScanner, calculate_trust_score
+from ..scanner import ScanResult, ScanResponse, TrustLevel, PatternMatch
 
 logger = logging.getLogger(__name__)
 

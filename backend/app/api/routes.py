@@ -1,6 +1,6 @@
 from fastapi import APIRouter
-from orchestrator import ScanOrchestrator
-from scan import ScanRequest, ScanResponse
+from ..orchestrator import ScanOrchestrator
+from ..scanner import ScanRequest, ScanResponse
 
 router = APIRouter()
 orchestrator = ScanOrchestrator()

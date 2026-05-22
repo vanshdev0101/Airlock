@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routes import router          # was: from app.api.routes import router
-from config import settings        # was: hardcoded list
+from .api import router          # was: from app.api.routes import router
+from .config import settings        # was: hardcoded list
 
 app = FastAPI(
     title="RepoGuard",

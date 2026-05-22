@@ -1,8 +1,8 @@
 import httpx
 import logging
 from datetime import datetime, timezone
-from config import get_settings
-from scan import AccountInfo
+from ..config import get_settings
+from ..scanner import AccountInfo
 
 logger = logging.getLogger(__name__)
 settings = get_settings()

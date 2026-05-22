@@ -3,7 +3,7 @@ Tests for the static scanner.
 Uses real code patterns from the OpenAI Hugging Face attack.
 """
 import pytest
-from static_scanner import StaticScanner, calculate_trust_score
+from app.scanner import StaticScanner, calculate_trust_score
 
 
 scanner = StaticScanner()
