@@ -94,7 +94,7 @@ class RepoFetcher:
         files_content: dict[str, str] = {}
         count = 0
         for filename in file_list:
-            if count >= settings.max_files_per_repo:
+            if count >= settings.max_files_per_scan:
                 break
             ext = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
             if ext not in SCANNABLE_EXTENSIONS:
@@ -164,7 +164,7 @@ class RepoFetcher:
         files_content: dict[str, str] = {}
         count = 0
         for filename in file_list:
-            if count >= settings.max_files_per_repo:
+            if count >= settings.max_files_per_scan:
                 break
             ext = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
             if ext not in SCANNABLE_EXTENSIONS:

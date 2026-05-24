@@ -1,6 +1,7 @@
-from pydantic import BaseModel, HttpUrl
-from enum import Enum
 from datetime import datetime
+from enum import Enum
+
+from pydantic import BaseModel, Field
 
 
 class TrustLevel(str, Enum):
@@ -10,42 +11,61 @@ class TrustLevel(str, Enum):
 
 
 class ScanRequest(BaseModel):
-    url: str
+    repo_url: str
 
 
 class PatternMatch(BaseModel):
-    category: str           # e.g. "obfuscation", "network", "system_exec"
-    pattern_name: str       # e.g. "base64_decode"
-    description: str        # human readable explanation
-    file_path: str          # which file it was found in
+    category: str
+    pattern_name: str
+    description: str
+    file_path: str
+
     line_number: int | None = None
-    severity: int           # 0-100 risk weight
-    snippet: str | None = None  # the actual code snippet (truncated)
+
+    severity: int
+
+    snippet: str | None = None
 
 
 class AccountInfo(BaseModel):
     username: str
-    account_age_days: int | None
-    total_repos: int | None
+
+    account_age_days: int | None = None
+
+    total_repos: int | None = None
+
     is_new_account: bool
+
     is_typosquat: bool
+
     typosquat_target: str | None = None
 
 
 class ScanResult(BaseModel):
     url: str
+
     repo_name: str
+
     scanned_at: datetime
+
     trust_level: TrustLevel
-    trust_score: int            # 0 = most dangerous, 100 = safest
+
+    trust_score: int
+
     account_info: AccountInfo
-    matches: list[PatternMatch]
+
+    matches: list[PatternMatch] = Field(default_factory=list)
+
     files_scanned: int
-    summary: str                # LLM-generated plain English summary
-    recommendations: list[str]  # what the user should do
+
+    summary: str
+
+    recommendations: list[str] = Field(default_factory=list)
 
 
 class ScanResponse(BaseModel):
     success: bool
+
     result: ScanResult | None = None
+
     error: str | None = None

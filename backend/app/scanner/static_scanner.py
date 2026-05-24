@@ -20,10 +20,19 @@ class Pattern:
     description: str
     severity: int
     regexes: list[str]
-    file_types: list[str]   # which file extensions to check
+    file_types: list[str]
 
 
-# ── All patterns we detect ───────────────────────────────────────────────────
+# ── Paths that reduce false positives ────────────────────────────────────────
+
+_TEST_PATHS = {"test", "tests", "docs", "doc", "examples", "example", "fixtures"}
+
+def _is_test_or_docs(file_path: str) -> bool:
+    parts = file_path.lower().replace("\\", "/").split("/")
+    return bool(_TEST_PATHS.intersection(parts))
+
+
+# ── All patterns ──────────────────────────────────────────────────────────────
 
 PATTERNS: list[Pattern] = [
 
@@ -32,7 +41,7 @@ PATTERNS: list[Pattern] = [
     Pattern(
         name="base64_decode_exec",
         category="obfuscation",
-        description="Base64 decoding combined with exec/eval — classic payload hiding technique used in the OpenAI Hugging Face attack",
+        description="Base64 decoding combined with exec/eval — classic payload hiding technique",
         severity=90,
         regexes=[
             r"eval\s*\(\s*base64",
@@ -46,7 +55,7 @@ PATTERNS: list[Pattern] = [
     Pattern(
         name="base64_decode",
         category="obfuscation",
-        description="Base64 encoded string being decoded at runtime — commonly used to hide URLs, commands, or payloads",
+        description="Base64 encoded string decoded at runtime — commonly hides URLs or payloads",
         severity=70,
         regexes=[
             r"base64\.b64decode\s*\(",
@@ -59,7 +68,7 @@ PATTERNS: list[Pattern] = [
     Pattern(
         name="hex_payload",
         category="obfuscation",
-        description="Long hex-encoded string — used to hide binary payloads or shellcode from visual inspection",
+        description="Long hex-encoded string — used to hide binary payloads or shellcode",
         severity=80,
         regexes=[
             r"bytes\.fromhex\s*\(['\"][0-9a-fA-F]{40,}",
@@ -71,7 +80,7 @@ PATTERNS: list[Pattern] = [
     Pattern(
         name="dynamic_eval",
         category="obfuscation",
-        description="eval() or exec() called on a dynamic or constructed string — executing unknown code at runtime",
+        description="eval() or exec() on a dynamic string — executing unknown code at runtime",
         severity=85,
         regexes=[
             r"eval\s*\(\s*compile\s*\(",
@@ -82,12 +91,12 @@ PATTERNS: list[Pattern] = [
         file_types=[".py"],
     ),
 
-    # ── Category 2: Network calls ─────────────────────────────────────────────
+    # ── Category 2: Network ───────────────────────────────────────────────────
 
     Pattern(
         name="ssl_verification_disabled",
         category="network",
-        description="SSL certificate verification explicitly disabled — allows connections to attacker-controlled servers with fake certs",
+        description="SSL verification explicitly disabled — allows connections to attacker servers",
         severity=88,
         regexes=[
             r"verify\s*=\s*False",
@@ -102,7 +111,7 @@ PATTERNS: list[Pattern] = [
     Pattern(
         name="suspicious_network_download",
         category="network",
-        description="Downloading and executing content from an external URL — could be fetching a payload from a C2 server",
+        description="Downloading and executing content from external URL — possible C2 fetch",
         severity=85,
         regexes=[
             r"urllib\.request\.urlretrieve\s*\(",
@@ -118,7 +127,7 @@ PATTERNS: list[Pattern] = [
     Pattern(
         name="dead_drop_resolver",
         category="network",
-        description="Fetching a URL from a paste/JSON service then executing the result — used to hide the real C2 server address one hop away",
+        description="Fetching C2 address from paste service — one-hop indirection to hide real server",
         severity=90,
         regexes=[
             r"jsonkeeper\.com",
@@ -134,7 +143,7 @@ PATTERNS: list[Pattern] = [
     Pattern(
         name="data_exfiltration",
         category="network",
-        description="Reading sensitive local files (SSH keys, .env, browser data) and sending them to a remote server",
+        description="Reading sensitive local files and sending to remote server",
         severity=99,
         regexes=[
             r"\.ssh[/\\]id_rsa",
@@ -154,7 +163,7 @@ PATTERNS: list[Pattern] = [
     Pattern(
         name="powershell_from_python",
         category="system_exec",
-        description="Python script launching PowerShell — classic two-stage loader pattern where Python fetches and PowerShell executes with elevated privileges",
+        description="Python launching PowerShell — two-stage loader pattern",
         severity=92,
         regexes=[
             r"subprocess.*powershell",
@@ -170,7 +179,7 @@ PATTERNS: list[Pattern] = [
     Pattern(
         name="defender_exclusion",
         category="system_exec",
-        description="Adding files to Windows Defender exclusion list — used exclusively by malware to avoid detection before executing payload",
+        description="Adding to Windows Defender exclusion list — malware evasion",
         severity=100,
         regexes=[
             r"Add-MpPreference\s+-ExclusionPath",
@@ -184,14 +193,13 @@ PATTERNS: list[Pattern] = [
     Pattern(
         name="privilege_escalation",
         category="system_exec",
-        description="Attempting to gain administrator/root privileges silently — no legitimate model loader needs elevated access",
+        description="Silently gaining admin/root privileges — no legitimate model needs this",
         severity=97,
         regexes=[
             r"runas\s*/user:Administrator",
             r"Start-Process.*-Verb\s+RunAs",
             r"ShellExecute.*runas",
             r"sudo\s+-S",
-            r"UAC",
         ],
         file_types=[".bat", ".ps1", ".py", ".sh"],
     ),
@@ -199,25 +207,24 @@ PATTERNS: list[Pattern] = [
     Pattern(
         name="persistence_mechanism",
         category="system_exec",
-        description="Creating scheduled tasks or registry entries to survive reboots — only malware needs to persist on the system",
+        description="Creating scheduled tasks or registry run keys — only malware needs persistence",
         severity=95,
         regexes=[
             r"schtasks\s*/create",
             r"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
             r"HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
             r"crontab\s+-[le]",
-            r"launchd.*plist",
             r"systemctl\s+enable",
         ],
         file_types=[".bat", ".ps1", ".py", ".sh"],
     ),
 
-    # ── Category 4: Suspicious file behaviour ────────────────────────────────
+    # ── Category 4: File behaviour ────────────────────────────────────────────
 
     Pattern(
         name="self_deletion",
         category="file_behaviour",
-        description="Script deletes itself after running — used by malware to remove evidence of execution",
+        description="Script deletes itself after running — evidence destruction",
         severity=98,
         regexes=[
             r"os\.remove\s*\(\s*__file__",
@@ -231,29 +238,22 @@ PATTERNS: list[Pattern] = [
     Pattern(
         name="suspicious_bat_in_ai_repo",
         category="file_behaviour",
-        description=".bat or .ps1 file present in an AI model repo — these have no legitimate purpose in a machine learning project",
+        description=".bat or .ps1 file in an AI model repo — no legitimate ML purpose",
         severity=75,
-        regexes=[
-            r".*",  # just the presence of the file is the signal — checked by file type
-        ],
+        regexes=[r".*"],
         file_types=[".bat", ".ps1"],
     ),
 
-    # ── Category 5: Anti-analysis evasion ────────────────────────────────────
+    # ── Category 5: Evasion ───────────────────────────────────────────────────
 
     Pattern(
         name="vm_detection",
         category="evasion",
-        description="Checking for virtual machine or sandbox environment — malware does this to avoid running during security analysis",
+        description="Checking for VM/sandbox environment — malware avoids running during analysis",
         severity=93,
         regexes=[
-            r"VMware",
-            r"VirtualBox",
-            r"VBOX",
-            r"QEMU",
-            r"Wireshark",
-            r"OllyDbg",
-            r"x64dbg",
+            r"VMware", r"VirtualBox", r"VBOX", r"QEMU",
+            r"Wireshark", r"OllyDbg", r"x64dbg",
             r"psutil.*cpu_count.*[<=>]=?\s*[12]",
         ],
         file_types=[".py", ".bat", ".ps1"],
@@ -262,23 +262,23 @@ PATTERNS: list[Pattern] = [
     Pattern(
         name="sandbox_sleep_delay",
         category="evasion",
-        description="Unusually long sleep/delay — used to outlast automated sandbox analysis timeouts before executing payload",
+        description="Unusually long sleep — outlasting automated sandbox timeouts",
         severity=60,
         regexes=[
-            r"time\.sleep\s*\(\s*[6-9][0-9]{1,}",   # sleep > 60 seconds
-            r"time\.sleep\s*\(\s*[1-9][0-9]{2,}",    # sleep > 100 seconds
+            r"time\.sleep\s*\(\s*[6-9][0-9]{1,}",
+            r"time\.sleep\s*\(\s*[1-9][0-9]{2,}",
             r"Start-Sleep\s+-[sS]\s+[6-9][0-9]",
             r"timeout\s+/t\s+[6-9][0-9]",
         ],
         file_types=[".py", ".bat", ".ps1"],
     ),
 
-    # ── Category 6: Pickle / model file exploits ──────────────────────────────
+    # ── Category 6: Pickle / model exploits ──────────────────────────────────
 
     Pattern(
         name="unsafe_pickle_load",
         category="model_exploit",
-        description="Loading a pickle file from an untrusted source — .pkl files can contain executable Python code that runs on load",
+        description="pickle.loads from untrusted source — .pkl files execute arbitrary Python on load",
         severity=85,
         regexes=[
             r"pickle\.loads?\s*\(",
@@ -288,70 +288,121 @@ PATTERNS: list[Pattern] = [
         ],
         file_types=[".py"],
     ),
+
+    # ── Category 7: HuggingFace-specific ─────────────────────────────────────
+
+    Pattern(
+        name="trust_remote_code_enabled",
+        category="hf_exploit",
+        description="trust_remote_code=True — executes arbitrary code from the repo on model load",
+        severity=85,
+        regexes=[
+            r"trust_remote_code\s*=\s*True",
+        ],
+        file_types=[".py", ".md", ".txt", ".yaml", ".yml", ".json"],
+    ),
+
+    Pattern(
+        name="pickle_checkpoint_detected",
+        category="hf_exploit",
+        description=".pkl/.pickle checkpoint file present — can execute code on torch.load()",
+        severity=80,
+        regexes=[r".*"],   # presence-based, checked by extension
+        file_types=[".pkl", ".pickle"],
+    ),
+
+    Pattern(
+        name="unsafe_torch_load",
+        category="hf_exploit",
+        description="torch.load() without weights_only=True — executes pickle bytecode on load",
+        severity=88,
+        regexes=[
+            r"torch\.load\s*\([^)]*\)",
+        ],
+        file_types=[".py"],
+    ),
+
+    Pattern(
+        name="config_auto_execute",
+        category="hf_exploit",
+        description="auto_model or pipeline with custom code class — can trigger remote execution",
+        severity=75,
+        regexes=[
+            r"AutoModel\.from_pretrained\s*\([^)]*trust_remote_code",
+            r"pipeline\s*\([^)]*trust_remote_code",
+            r"from_pretrained\s*\([^)]*trust_remote_code",
+        ],
+        file_types=[".py", ".md"],
+    ),
+
+    Pattern(
+        name="binary_model_with_code",
+        category="hf_exploit",
+        description=".bin model file alongside executable Python — possible trojanized checkpoint",
+        severity=70,
+        regexes=[r".*"],   # presence-based, checked by extension in HF context
+        file_types=[".bin"],
+    ),
 ]
 
 
-# ── Scanner class ─────────────────────────────────────────────────────────────
+# ── Scanner ───────────────────────────────────────────────────────────────────
 
 class StaticScanner:
-    """
-    Scans a dict of {filename: content} and returns a list of PatternMatch.
-    Uses both regex and Python AST parsing.
-    """
-
     def __init__(self):
         self.patterns = PATTERNS
 
     def scan_files(self, files: dict[str, str]) -> list[PatternMatch]:
-        """Main entry point. files = {path: content}"""
         matches: list[PatternMatch] = []
-
         for file_path, content in files.items():
             if not content:
                 continue
             ext = self._get_extension(file_path)
-            file_matches = self._scan_single_file(file_path, content, ext)
-            matches.extend(file_matches)
-
+            matches.extend(self._scan_single_file(file_path, content, ext))
         return matches
 
-    def _scan_single_file(
-        self, file_path: str, content: str, ext: str
-    ) -> list[PatternMatch]:
+    def _scan_single_file(self, file_path: str, content: str, ext: str) -> list[PatternMatch]:
         matches: list[PatternMatch] = []
+        in_test = _is_test_or_docs(file_path)
 
         for pattern in self.patterns:
             if ext not in pattern.file_types:
                 continue
 
-            # Special case: .bat/.ps1 presence is itself the signal
-            if pattern.name == "suspicious_bat_in_ai_repo":
-                if ext in [".bat", ".ps1"]:
-                    matches.append(PatternMatch(
-                        category=pattern.category,
-                        pattern_name=pattern.name,
-                        description=pattern.description,
-                        file_path=file_path,
-                        severity=pattern.severity,
-                        snippet=f"File type: {ext}",
-                    ))
+            # Presence-based patterns (file extension is the signal)
+            if pattern.name in (
+                "suspicious_bat_in_ai_repo",
+                "pickle_checkpoint_detected",
+                "binary_model_with_code",
+            ):
+                if in_test:
+                    continue
+                matches.append(PatternMatch(
+                    category=pattern.category,
+                    pattern_name=pattern.name,
+                    description=pattern.description,
+                    file_path=file_path,
+                    severity=pattern.severity,
+                    snippet=f"File type: {ext}",
+                ))
                 continue
 
-            # Regex scan
+            # Regex-based patterns — skip test/docs paths for low-severity hits
             for regex in pattern.regexes:
-                found = self._regex_scan(content, regex, file_path, pattern)
+                found = self._regex_scan(content, regex, file_path, pattern, in_test)
                 matches.extend(found)
 
-        # AST-based scan for Python files
         if ext == ".py":
-            ast_matches = self._ast_scan(content, file_path)
-            matches.extend(ast_matches)
+            matches.extend(self._ast_scan(content, file_path))
 
         return matches
 
     def _regex_scan(
-        self, content: str, regex: str, file_path: str, pattern: Pattern
+        self, content: str, regex: str, file_path: str, pattern: Pattern, in_test: bool
     ) -> list[PatternMatch]:
+        # Suppress low-severity hits in test/docs paths
+        if in_test and pattern.severity < 90:
+            return []
         matches = []
         try:
             for i, line in enumerate(content.splitlines(), start=1):
@@ -365,27 +416,23 @@ class StaticScanner:
                         severity=pattern.severity,
                         snippet=line.strip()[:200],
                     ))
-                    break  # one match per pattern per file is enough
+                    break  # one match per pattern per file
         except re.error as e:
             logger.warning(f"Bad regex {regex!r}: {e}")
         return matches
 
     def _ast_scan(self, content: str, file_path: str) -> list[PatternMatch]:
-        """
-        Parse Python source into an AST and look for dangerous call chains
-        that regex alone might miss (e.g. exec(base64.b64decode(x)) split
-        across multiple lines).
-        """
         matches = []
         try:
             tree = ast.parse(content)
         except SyntaxError:
-            return matches  # not valid Python, skip
+            return matches
 
         for node in ast.walk(tree):
-            # Detect: exec(base64.b64decode(...)) or eval(base64.b64decode(...))
             if isinstance(node, ast.Call):
                 func_name = self._get_call_name(node)
+
+                # exec/eval wrapping b64decode
                 if func_name in ("exec", "eval"):
                     for arg in node.args:
                         if isinstance(arg, ast.Call):
@@ -394,27 +441,39 @@ class StaticScanner:
                                 matches.append(PatternMatch(
                                     category="obfuscation",
                                     pattern_name="ast_exec_b64decode",
-                                    description="AST confirmed: exec/eval wrapping base64.b64decode — payload execution pattern",
+                                    description="AST: exec/eval wrapping base64.b64decode — payload execution",
                                     file_path=file_path,
                                     line_number=node.lineno,
                                     severity=95,
                                     snippet=f"{func_name}(base64.b64decode(...)) at line {node.lineno}",
                                 ))
 
-            # Detect: subprocess calls with 'powershell' in args
-            if isinstance(node, ast.Call):
-                func_name = self._get_call_name(node)
+                # subprocess launching shell
                 if func_name in ("subprocess.run", "subprocess.Popen", "os.system"):
                     src = ast.unparse(node)
                     if "powershell" in src.lower() or "cmd.exe" in src.lower():
                         matches.append(PatternMatch(
                             category="system_exec",
                             pattern_name="ast_subprocess_shell",
-                            description="AST confirmed: subprocess launching shell (powershell/cmd.exe)",
+                            description="AST: subprocess launching shell (powershell/cmd.exe)",
                             file_path=file_path,
                             line_number=node.lineno,
                             severity=92,
                             snippet=src[:200],
+                        ))
+
+                # torch.load without weights_only=True
+                if func_name == "torch.load":
+                    kwargs = {kw.arg for kw in node.keywords}
+                    if "weights_only" not in kwargs:
+                        matches.append(PatternMatch(
+                            category="hf_exploit",
+                            pattern_name="ast_torch_load_unsafe",
+                            description="AST: torch.load() missing weights_only=True — unsafe pickle execution",
+                            file_path=file_path,
+                            line_number=node.lineno,
+                            severity=88,
+                            snippet=f"torch.load() at line {node.lineno}",
                         ))
 
         return matches
@@ -439,26 +498,49 @@ class StaticScanner:
         return "." + path.rsplit(".", 1)[-1].lower()
 
 
-# ── Score calculator ──────────────────────────────────────────────────────────
+# ── Weighted trust scoring ────────────────────────────────────────────────────
+
+# How much each category contributes to the final deduction
+_CATEGORY_WEIGHTS = {
+    "hf_exploit":     1.4,   # HF-specific attacks weighted up
+    "model_exploit":  1.3,
+    "system_exec":    1.3,
+    "network":        1.2,
+    "obfuscation":    1.1,
+    "evasion":        1.0,
+    "file_behaviour": 0.6,   # presence signals weighted down
+    "account":        0.5,
+}
+
+# Single finding in these categories is an instant ceiling
+_INSTANT_DANGEROUS = {"system_exec", "hf_exploit"}
+_INSTANT_DANGEROUS_THRESHOLD = 90   # severity must also be >= this
+
 
 def calculate_trust_score(matches: list[PatternMatch]) -> int:
     """
-    Returns 0 (most dangerous) to 100 (safest).
-    Starts at 100 and deducts based on findings.
-    Uses diminishing deductions so one critical finding = dangerous
-    but doesn't go below 0.
+    Returns 0 (dangerous) to 100 (safe).
+    Uses category-weighted deductions with diminishing returns.
+    High-severity hits in critical categories trigger instant DANGEROUS ceiling.
     """
     if not matches:
         return 100
 
-    score = 100
-    # Sort by severity descending so worst hits first
+    # Instant dangerous: one critical finding in a high-risk category
+    for m in matches:
+        if (
+            m.category in _INSTANT_DANGEROUS
+            and m.severity >= _INSTANT_DANGEROUS_THRESHOLD
+        ):
+            return 15  # DANGEROUS range, not zero (leaves room for gradation)
+
+    score = 100.0
     sorted_matches = sorted(matches, key=lambda m: m.severity, reverse=True)
 
     for i, match in enumerate(sorted_matches):
-        # Diminishing returns: each additional finding hurts less
-        multiplier = 1.0 / (1 + i * 0.3)
-        deduction = (match.severity / 100) * 40 * multiplier
+        weight = _CATEGORY_WEIGHTS.get(match.category, 1.0)
+        diminish = 1.0 / (1 + i * 0.3)
+        deduction = (match.severity / 100) * 40 * weight * diminish
         score -= deduction
 
     return max(0, round(score))
