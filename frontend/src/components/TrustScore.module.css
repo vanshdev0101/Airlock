@@ -1,0 +1,104 @@
+.wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-5);
+  flex-wrap: wrap;
+}
+
+/* Status hue for this result, resolved once and reused by fill/track/badge. */
+.wrap[data-status="good"] {
+  --hue: var(--st-good-text);
+}
+.wrap[data-status="warning"] {
+  --hue: var(--st-warning-text);
+}
+.wrap[data-status="critical"] {
+  --hue: var(--st-critical-text);
+}
+
+.figure {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+/* Hero figure: >=48px. Proportional figures — tabular-nums would make a
+   number like 100 look loose at this size. */
+.score {
+  font-family: var(--font-mono);
+  font-size: var(--text-hero);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  color: var(--hue);
+  font-variant-numeric: proportional-nums;
+}
+
+.outOf {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--ink-muted);
+}
+
+.meterCol {
+  flex: 1;
+  min-width: 190px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+/* Track is a lighter step of the fill's own hue, not neutral grey. */
+.track {
+  position: relative;
+  height: 10px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklab, var(--hue) 18%, var(--surface-inset));
+  overflow: hidden;
+}
+
+.fill {
+  height: 100%;
+  background: var(--hue);
+  /* 4px rounded data-end, anchored flat to the baseline start. */
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  transition: inline-size 520ms var(--ease);
+}
+
+.legend {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--hue);
+  background: color-mix(in oklab, var(--hue) 13%, transparent);
+  border: 1px solid color-mix(in oklab, var(--hue) 32%, transparent);
+  border-radius: var(--radius-pill);
+  padding: 3px var(--sp-3);
+}
+
+.scale {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 480px) {
+  .score {
+    font-size: 2.75rem;
+  }
+}

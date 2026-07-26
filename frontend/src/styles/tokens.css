@@ -1,0 +1,161 @@
+/*
+ * RepoGuard design tokens.
+ *
+ * Every colour pairing below was measured with a WCAG contrast check against
+ * the surface it actually sits on — not eyeballed. Light mode is a *selected*
+ * palette, not an inverted copy of dark: the raw status hues that work on the
+ * dark surface fail badly on paper (warning #fab219 measures 1.75 on #FAFAF7),
+ * so light mode gets its own darker steps.
+ *
+ * Status colours are reserved for state. They never carry meaning alone —
+ * every use pairs them with an icon/glyph and a text label.
+ */
+
+:root {
+  /* ── Type ─────────────────────────────────────────────────────────────── */
+  --font-mono: "JetBrains Mono", "Space Mono", ui-monospace, SFMono-Regular,
+    Menlo, Consolas, monospace;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, sans-serif;
+
+  /* Type scale — 1.200 minor third, 14px base */
+  --text-2xs: 0.6875rem;  /* 11px */
+  --text-xs: 0.75rem;     /* 12px */
+  --text-sm: 0.8125rem;   /* 13px */
+  --text-base: 0.875rem;  /* 14px */
+  --text-md: 1rem;        /* 16px */
+  --text-lg: 1.25rem;     /* 20px */
+  --text-xl: 1.5rem;      /* 24px */
+  --text-hero: 3.25rem;   /* 52px — hero figure, >=48px per spec */
+
+  /* ── Spacing — 4px rhythm ─────────────────────────────────────────────── */
+  --sp-1: 0.25rem;
+  --sp-2: 0.5rem;
+  --sp-3: 0.75rem;
+  --sp-4: 1rem;
+  --sp-5: 1.5rem;
+  --sp-6: 2rem;
+  --sp-7: 3rem;
+
+  /* ── Radii / motion ───────────────────────────────────────────────────── */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 100px;
+
+  --ease: cubic-bezier(0.2, 0, 0.1, 1);
+  --dur-fast: 120ms;
+  --dur: 200ms;
+
+  --focus-ring: 2px solid var(--accent);
+  --focus-offset: 2px;
+}
+
+/* ── Dark (default) ─────────────────────────────────────────────────────── */
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --surface: #1a1a19;
+  --surface-raised: #232322;
+  --surface-inset: #121211;
+  --surface-hover: #2c2c2a;
+
+  --border: #34342f;
+  --border-strong: #45453e;
+
+  --ink: #e8e8e4;         /* 14.18 on surface */
+  --ink-secondary: #a8a89e; /* 7.27 */
+  --ink-muted: #757169;     /* 3.58 — large text / non-essential only */
+
+  --accent: #b0fe76;        /* 14.34 on surface — also the ink colour */
+  --accent-hover: #c4ffa0;  /* accent as *ink*: links, glyphs, active tabs */
+  --accent-soft: rgba(176, 254, 118, 0.12);
+  --accent-border: rgba(176, 254, 118, 0.35);
+
+  /* Filled controls are a separate pair from accent-as-ink: the fill must stay
+     light in both themes so the dark ink on top keeps its 14:1 contrast. */
+  --accent-fill: #b0fe76;
+  --accent-fill-hover: #c4ffa0;
+  --accent-ink: #1a1a19;    /* 14.34 on --accent-fill */
+
+  /* Status — marks. Measured on --surface. */
+  --st-good: #0ca30c;
+  --st-warning: #fab219;
+  --st-serious: #ec835a;
+  --st-critical: #d03b3b;
+
+  /* Status — text steps, lightened to clear 4.5:1 on --surface-raised. */
+  --st-good-text: #7cd97c;     /* 9.04 */
+  --st-warning-text: #fac33f;  /* 9.70 */
+  --st-serious-text: #f0a077;  /* 7.49 */
+  --st-critical-text: #f08a8a; /* 6.52 */
+  --st-info-text: #9aa8b5;     /* 6.47 */
+
+  --st-good-soft: rgba(124, 217, 124, 0.13);
+  --st-warning-soft: rgba(250, 195, 63, 0.13);
+  --st-serious-soft: rgba(240, 160, 119, 0.13);
+  --st-critical-soft: rgba(240, 138, 138, 0.13);
+  --st-info-soft: rgba(154, 168, 181, 0.12);
+
+  --skeleton: linear-gradient(
+    90deg,
+    var(--surface-raised) 0%,
+    var(--surface-hover) 50%,
+    var(--surface-raised) 100%
+  );
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.24);
+}
+
+/* ── Light ──────────────────────────────────────────────────────────────── */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --surface: #fafaf7;
+  --surface-raised: #ffffff;
+  --surface-inset: #f1f1ea;
+  --surface-hover: #f0f0e9;
+
+  --border: #e0e0d6;
+  --border-strong: #c9c9bc;
+
+  --ink: #1f1f1d;           /* 15.79 on surface */
+  --ink-secondary: #55554e; /* 7.18 */
+  --ink-muted: #7a7a72;     /* 4.14 */
+
+  /* Raw neon measures 1.16 on paper — unusable as ink. Darkened for text,
+     while filled controls keep the neon with dark ink on top (14.34). */
+  --accent: #3d7a16;        /* 5.03 */
+  --accent-hover: #33660f;
+  --accent-soft: rgba(61, 122, 22, 0.1);
+  --accent-border: rgba(61, 122, 22, 0.32);
+
+  --accent-fill: #b0fe76;
+  --accent-fill-hover: #9bf05c; /* deepened neon, not the dark link green */
+  --accent-ink: #1a1a19;
+
+  --st-good: #0a7a0a;
+  --st-warning: #8a6100;
+  --st-serious: #a04a22;
+  --st-critical: #b02525;
+
+  --st-good-text: #0a7a0a;     /* 5.28 */
+  --st-warning-text: #8a6100;  /* 5.30 */
+  --st-serious-text: #a04a22;  /* 5.74 */
+  --st-critical-text: #b02525; /* 6.40 */
+  --st-info-text: #4a5560;
+
+  --st-good-soft: rgba(10, 122, 10, 0.09);
+  --st-warning-soft: rgba(138, 97, 0, 0.1);
+  --st-serious-soft: rgba(160, 74, 34, 0.09);
+  --st-critical-soft: rgba(176, 37, 37, 0.09);
+  --st-info-soft: rgba(74, 85, 96, 0.08);
+
+  --skeleton: linear-gradient(
+    90deg,
+    var(--surface-inset) 0%,
+    #e6e6dd 50%,
+    var(--surface-inset) 100%
+  );
+  --shadow: 0 1px 2px rgba(31, 31, 29, 0.06), 0 8px 24px rgba(31, 31, 29, 0.07);
+}
