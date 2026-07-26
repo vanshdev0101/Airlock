@@ -103,10 +103,15 @@ class Settings(BaseSettings):
     # CORS
     # ─────────────────────────────────────────────────────────────
 
+    # Browsers treat localhost and 127.0.0.1 as distinct origins, and Vite
+    # prints both. Allow both spellings or the app silently 400s on every
+    # request depending on which URL the developer happened to open.
     cors_origins: list[str] = Field(
         default_factory=lambda: [
             "http://localhost:5173",
+            "http://127.0.0.1:5173",
             "http://localhost:3000",
+            "http://127.0.0.1:3000",
         ],
         alias="CORS_ORIGINS",
     )
