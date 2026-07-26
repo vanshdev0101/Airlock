@@ -6,7 +6,10 @@ import httpx
 
 from ..config import get_settings
 from ..core.exceptions import FetchError
+from ..core.text import levenshtein
+from ..scanner.pickle_scanner import PICKLE_WEIGHT_EXTENSIONS
 from ..scanner.scan import AccountInfo
+from .pickle_fetch import fetch_pickle_streams
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -19,6 +22,79 @@ SCANNABLE_EXTENSIONS = {
 
 MAX_FILE_BYTES = settings.max_file_size_kb * 1024
 _SEMAPHORE = asyncio.Semaphore(10)
+
+# ── Scan budget priority ──────────────────────────────────────────────────────
+# The file budget used to be "whatever the API listed first", which is not a
+# budget so much as an accident: a payload in file 101 was invisible while the
+# 100 slots went to translation files. Rank by where malicious code actually
+# lives, so truncation drops the least interesting files instead of arbitrary
+# ones. Lower number = looked at first.
+
+# Executed on install or import — the classic drop point for a payload.
+_CRITICAL_NAMES = {
+    "setup.py", "setup.cfg", "conftest.py", "__init__.py", "manage.py",
+    "install.sh", "install.py", "postinstall.js", "preinstall.js",
+    "docker-entrypoint.sh", "entrypoint.sh", "run.sh", "start.sh",
+}
+# Declares what gets pulled in — the supply-chain surface.
+_MANIFEST_NAMES = {
+    "requirements.txt", "pyproject.toml", "package.json", "pipfile",
+    "environment.yml", "environment.yaml", "setup.py",
+}
+# Enormous, machine-generated, and never where an attacker hides anything.
+_LOCKFILE_NAMES = {
+    "package-lock.json", "yarn.lock", "poetry.lock", "pnpm-lock.yaml",
+    "pdm.lock", "uv.lock",
+}
+_EXECUTABLE_EXTENSIONS = {".sh", ".bat", ".ps1"}
+
+
+def _scan_priority(path: str) -> tuple[int, int]:
+    """Sort key for the file budget: (tier, directory depth)."""
+    lower = path.lower().replace("\\", "/")
+    name = lower.rsplit("/", 1)[-1]
+    ext = ("." + name.rsplit(".", 1)[-1]) if "." in name else ""
+    depth = lower.count("/")
+
+    if name in _LOCKFILE_NAMES:
+        tier = 8
+    elif _is_test_or_docs_path(lower):
+        tier = 7
+    elif name in _CRITICAL_NAMES:
+        tier = 0
+    elif name in _MANIFEST_NAMES:
+        tier = 1
+    elif ext in _EXECUTABLE_EXTENSIONS:
+        tier = 2
+    elif ext == ".py":
+        tier = 3
+    elif ext in (".js", ".ts"):
+        tier = 4
+    elif ext in (".yaml", ".yml", ".toml", ".cfg", ".ini", ".json"):
+        tier = 5
+    else:  # .md, .txt — documentation, read last
+        tier = 6
+
+    return (tier, depth)
+
+
+def _is_test_or_docs_path(lower_path: str) -> bool:
+    parts = lower_path.split("/")
+    return any(
+        p in ("test", "tests", "docs", "doc", "examples", "example", "fixtures")
+        for p in parts[:-1]
+    ) or parts[-1].startswith("test_")
+
+
+def _budgeted(file_list: list[str]) -> list[str]:
+    """The files worth spending the scan budget on, best first."""
+    scannable = [f for f in file_list if _ext_of(f) in SCANNABLE_EXTENSIONS]
+    scannable.sort(key=_scan_priority)
+    return scannable[: settings.max_files_per_scan]
+
+
+def _ext_of(path: str) -> str:
+    return ("." + path.rsplit(".", 1)[-1].lower()) if "." in path else ""
 
 
 class RepoFetcher:
@@ -79,25 +155,34 @@ class RepoFetcher:
                 "or it is private/gated. RepoGuard can only scan public repos."
             )
 
-        file_list = [s["rfilename"] for s in meta.get("siblings", [])]
-        scannable = [f for f in file_list if self._ext(f) in SCANNABLE_EXTENSIONS][:settings.max_files_per_scan]
+        siblings = meta.get("siblings", [])
+        file_list = [s["rfilename"] for s in siblings]
+        sizes = {s["rfilename"]: s.get("size") or 0 for s in siblings}
+        scannable = _budgeted(file_list)
 
         # Always try README
         for readme in ["README.md", "readme.md", "MODEL_CARD.md"]:
             if readme not in scannable:
                 scannable.append(readme)
 
+        def resolve(f: str) -> str:
+            return f"https://huggingface.co/{repo_id}/resolve/main/{f}"
+
         files_content = await self._download_many(
-            client,
-            {f: f"https://huggingface.co/{repo_id}/resolve/main/{f}" for f in scannable}
+            client, {f: resolve(f) for f in scannable}
         )
         self._require_readable_files(files_content, repo_id)
+
+        pickle_streams = await fetch_pickle_streams(
+            self._pickle_candidates(file_list, sizes, resolve)
+        )
 
         author_info = await self._fetch_hf_author(client, owner)
         return {
             "repo_name": repo_id, "platform": "huggingface",
             "account_info": self._build_account_info(owner, author_info),
             "files": files_content, "raw_metadata": meta,
+            "all_files": file_list, "pickle_streams": pickle_streams,
             "downloads": meta.get("downloads", 0), "likes": meta.get("likes", 0),
         }
 
@@ -117,12 +202,18 @@ class RepoFetcher:
             f"{self.gh_base}/repos/{owner}/{repo}/git/trees/HEAD",
             params={"recursive": "1"}, headers=self.gh_headers)
         self._raise_for_github(tree_resp, f"{owner}/{repo}")
-        file_list = [i["path"] for i in tree_resp.json().get("tree", []) if i["type"] == "blob"]
+        blobs = [i for i in tree_resp.json().get("tree", []) if i["type"] == "blob"]
+        file_list = [i["path"] for i in blobs]
+        sizes = {i["path"]: i.get("size") or 0 for i in blobs}
 
-        scannable = [f for f in file_list if self._ext(f) in SCANNABLE_EXTENSIONS][:settings.max_files_per_scan]
+        scannable = _budgeted(file_list)
         base = f"https://raw.githubusercontent.com/{owner}/{repo}/HEAD"
         files_content = await self._download_many(client, {f: f"{base}/{f}" for f in scannable})
         self._require_readable_files(files_content, f"{owner}/{repo}")
+
+        pickle_streams = await fetch_pickle_streams(
+            self._pickle_candidates(file_list, sizes, lambda f: f"{base}/{f}")
+        )
 
         user_resp = await client.get(f"{self.gh_base}/users/{owner}", headers=self.gh_headers)
         user_data = user_resp.json() if user_resp.status_code == 200 else {}
@@ -131,9 +222,25 @@ class RepoFetcher:
             "repo_name": f"{owner}/{repo}", "platform": "github",
             "account_info": self._build_account_info(owner, user_data, platform="github"),
             "files": files_content, "raw_metadata": meta,
+            "all_files": file_list, "pickle_streams": pickle_streams,
             "downloads": meta.get("stargazers_count", 0),
             "likes": meta.get("watchers_count", 0),
         }
+
+    def _pickle_candidates(self, file_list, sizes: dict, url_for) -> list[dict]:
+        """Weight artifacts worth probing, biggest-signal first.
+
+        Ordered smallest-first: a small pickle is cheap to read in full, and
+        the tiny `data.pkl`-style files are where a hand-written payload
+        usually lives.
+        """
+        candidates = [
+            {"path": f, "url": url_for(f), "size": sizes.get(f, 0)}
+            for f in file_list
+            if self._ext(f) in PICKLE_WEIGHT_EXTENSIONS
+        ]
+        candidates.sort(key=lambda c: c["size"])
+        return candidates
 
     def _raise_for_github(self, resp: httpx.Response, repo_id: str) -> None:
         """Turn a non-200 GitHub response into a FetchError with a usable message."""
@@ -215,22 +322,10 @@ class RepoFetcher:
             t = trusted.lower().replace("-", "").replace("_", "")
             if clean == t:
                 return False, None
-            dist = _levenshtein(clean, t)
+            dist = levenshtein(clean, t)
             if dist <= 2 and abs(len(clean) - len(t)) <= 3 and dist > 0:
                 return True, trusted
         return False, None
 
     def _ext(self, path):
-        return ("." + path.rsplit(".", 1)[-1].lower()) if "." in path else ""
-
-
-def _levenshtein(a, b):
-    if len(a) < len(b): return _levenshtein(b, a)
-    if not b: return len(a)
-    prev = list(range(len(b) + 1))
-    for ca in a:
-        curr = [prev[0] + 1]
-        for j, cb in enumerate(b):
-            curr.append(min(prev[j+1]+1, curr[j]+1, prev[j]+(ca != cb)))
-        prev = curr
-    return prev[-1]
+        return _ext_of(path)

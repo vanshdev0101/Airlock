@@ -38,6 +38,7 @@ const CATEGORY_LABELS = {
   evasion: "Evasion",
   model_exploit: "Model exploit",
   hf_exploit: "Hugging Face",
+  supply_chain: "Supply chain",
   account: "Account",
 };
 

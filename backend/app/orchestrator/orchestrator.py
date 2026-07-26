@@ -14,6 +14,8 @@ import httpx
 
 from app.core.exceptions import RepoGuardError
 from app.fetcher.fetcher import RepoFetcher
+from app.scanner.dependency_scanner import scan_dependencies
+from app.scanner.pickle_scanner import check_weight_formats, scan_pickle_streams
 from app.scanner.scan import PatternMatch, ScanResponse, ScanResult, TrustLevel
 from app.scanner.static_scanner import StaticScanner, calculate_trust_score
 from app.db.crud import save_scan
@@ -33,6 +35,17 @@ class ScanOrchestrator:
 
             logger.info(f"Scanning {len(repo_data['files'])} files")
             matches = self.static.scan_files(repo_data["files"])
+
+            # What the repo pulls in matters as much as what it contains.
+            matches.extend(scan_dependencies(repo_data["files"]))
+
+            # Weight files are analysed as opcode streams, never loaded.
+            streams = repo_data.get("pickle_streams") or []
+            if streams:
+                logger.info(f"Analysing {len(streams)} pickle stream(s)")
+                matches.extend(scan_pickle_streams(streams))
+            matches.extend(check_weight_formats(repo_data.get("all_files") or []))
+
             matches.extend(self._account_signals(repo_data))
 
             score = calculate_trust_score(matches)

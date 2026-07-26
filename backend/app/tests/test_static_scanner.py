@@ -206,3 +206,47 @@ del /f %~f0
     assert "network" in categories
     assert "system_exec" in categories
     assert len(matches) >= 5
+
+
+# ── Prose vs code (added with the ranked file budget) ─────────────────────────
+
+def test_trust_remote_code_in_an_error_message_is_prose():
+    """transformers raises 'set the option `trust_remote_code=True`' — advice."""
+    src = (
+        'def check(x):\n'
+        '    raise ValueError(\n'
+        '        "Loading requires custom code. Set the option "\n'
+        '        "`trust_remote_code=True` to allow it."\n'
+        '    )\n'
+    )
+    matches = scanner.scan_files({"pipelines/__init__.py": src})
+    assert [m.pattern_name for m in matches] == ["trust_remote_code_enabled"]
+    assert matches[0].severity == 30
+    assert calculate_trust_score(matches) >= 90
+
+
+def test_trust_remote_code_beside_a_string_is_still_code():
+    """The call and an unrelated string share a line — column precision matters."""
+    src = "model = AutoModel.from_pretrained('org/model', trust_remote_code=True)\n"
+    matches = scanner.scan_files({"load.py": src})
+    assert matches[0].severity == 85
+
+
+def test_trust_remote_code_in_a_docstring_is_prose():
+    src = '"""Usage:\n\n    load(trust_remote_code=True)\n"""\n'
+    matches = scanner.scan_files({"mod.py": src})
+    assert matches[0].severity == 30
+
+
+def test_unparsable_file_keeps_full_severity():
+    """If we cannot tokenize, we must not downgrade on a guess."""
+    src = "this is not python at all !!! trust_remote_code=True\n"
+    matches = scanner.scan_files({"broken.py": src})
+    assert matches[0].severity == 85
+
+
+def test_library_pickle_use_is_not_dangerous_on_its_own():
+    """pydantic exposes a pickle parser; that is a capability, not malware."""
+    src = "import pickle\n\ndef load(bb):\n    return pickle.loads(bb)\n"
+    matches = scanner.scan_files({"deprecated/parse.py": src})
+    assert calculate_trust_score(matches) >= 70

@@ -4,8 +4,10 @@ Regex + AST — no code execution.
 """
 
 import ast
+import io
 import logging
 import re
+import tokenize
 from dataclasses import dataclass
 
 from .scan import PatternMatch
@@ -26,6 +28,13 @@ class Pattern:
     # install scripts; disabling Defender does not. Only malware-grade signals
     # may short-circuit the score to "dangerous".
     malware_grade: bool = False
+    # Severity to use when the match turns out to sit inside a string literal.
+    # Some signals are as likely to appear in an error message or docstring as
+    # in real code — `transformers` tells users to "set the option
+    # `trust_remote_code=True`", which is advice, not an execution. Set this
+    # and prose gets downgraded rather than dropped, because prose describing
+    # a dangerous action is still worth reading.
+    prose_severity: int | None = None
 
 
 # ── Path helpers ──────────────────────────────────────────────────────────────
@@ -36,6 +45,44 @@ _TEST_PATHS = {"test", "tests", "docs", "doc", "examples", "example", "fixtures"
 def _is_test_or_docs(path: str) -> bool:
     parts = path.lower().replace("\\", "/").split("/")
     return bool(_TEST_PATHS.intersection(parts))
+
+
+_EOL = 10**9
+
+
+def _string_literal_spans(content: str) -> dict[int, list[tuple[int, int]]]:
+    """Column ranges covered by string literals, keyed by line number.
+
+    Used to tell a dangerous call apart from prose describing one —
+    `transformers` raises an error reading "set the option
+    `trust_remote_code=True`", which is advice, not an execution.
+
+    Tokenizing is exact where a regex would guess. A file that will not
+    tokenize yields nothing, so its matches keep full severity rather than
+    being quietly downgraded.
+    """
+    spans: dict[int, list[tuple[int, int]]] = {}
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(content).readline):
+            if tok.type != tokenize.STRING:
+                continue
+            (start_line, start_col), (end_line, end_col) = tok.start, tok.end
+            if start_line == end_line:
+                spans.setdefault(start_line, []).append((start_col, end_col))
+                continue
+            # A docstring covers the rest of its opening line, every line in
+            # between, and the start of its closing line.
+            spans.setdefault(start_line, []).append((start_col, _EOL))
+            for line in range(start_line + 1, end_line):
+                spans.setdefault(line, []).append((0, _EOL))
+            spans.setdefault(end_line, []).append((0, end_col))
+    except Exception:
+        return {}
+    return spans
+
+
+def _in_span(spans: dict[int, list[tuple[int, int]]], line: int, col: int) -> bool:
+    return any(start <= col < end for start, end in spans.get(line, ()))
 
 
 # Fix 5: allowlist known-safe bat files, skip docs/
@@ -59,8 +106,11 @@ PATTERNS: list[Pattern] = [
              r"base64\.b64decode.*eval", r"base64\.b64decode.*exec"],
             [".py"], malware_grade=True),
 
+    # Decoding base64 is a capability, not an attack — pydantic's Base64 type
+    # calls b64decode because that is the feature. Hiding a payload in it is
+    # the threat, and base64_decode_exec above covers that at malware grade.
     Pattern("base64_decode", "obfuscation",
-            "Base64 decoded at runtime — commonly hides URLs or payloads", 70,
+            "Base64 decoded at runtime — check what the decoded value is used for", 35,
             [r"base64\.b64decode\s*\(", r"base64\.urlsafe_b64decode\s*\(",
              r"__import__\(['\"]base64['\"]"], [".py"]),
 
@@ -170,8 +220,12 @@ PATTERNS: list[Pattern] = [
             [".py", ".bat", ".ps1"]),
 
     # Pickle / model
+    # Calling pickle.loads is a capability every serialisation library has —
+    # pydantic exposes one deliberately. What matters is the gadget inside the
+    # data, which malicious_reduce_payload and the pickle opcode scanner catch.
+    # Same reasoning that already dropped ast_torch_load_unsafe from 88 to 55.
     Pattern("unsafe_pickle_load", "model_exploit",
-            "pickle.loads — arbitrary Python executes on deserialization", 85,
+            "pickle.loads — arbitrary Python executes if the data is untrusted", 55,
             [r"pickle\.loads?\s*\("], [".py"]),
 
     # Bare __reduce__/__reduce_ex__ was removed: defining them is the standard
@@ -188,7 +242,7 @@ PATTERNS: list[Pattern] = [
             "trust_remote_code=True — executes arbitrary repo code on model load", 85,
             [r"trust_remote_code\s*=\s*True",
              r"from_pretrained\s*\([^)]*trust_remote_code"],
-            [".py", ".yaml", ".yml", ".json"]),
+            [".py", ".yaml", ".yml", ".json"], prose_severity=30),
 
     # Same string in a model card is documentation, not an executed call.
     # Worth surfacing so the reader knows to check, but not a threat by itself.
@@ -196,13 +250,12 @@ PATTERNS: list[Pattern] = [
             "Docs instruct loading with trust_remote_code=True — verify the repo's own code", 30,
             [r"trust_remote_code\s*=\s*True"], [".md", ".txt"]),
 
-    Pattern("pickle_checkpoint_detected", "hf_exploit",
-            ".pkl file present — executes code on torch.load()", 80,
-            [r".*"], [".pkl", ".pickle"]),
-
-    Pattern("binary_model_with_code", "hf_exploit",
-            ".bin model alongside Python — possible trojanized checkpoint", 70,
-            [r".*"], [".bin"]),
+    # Weight files are not handled here. `pickle_checkpoint_detected` and
+    # `binary_model_with_code` used to live at this spot as presence patterns
+    # on .pkl/.bin, but the fetcher only ever downloads text extensions, so
+    # they could never fire — the README's headline claim was dead code.
+    # Real detection now reads the pickle opcode stream: see
+    # scanner/pickle_scanner.py.
 ]
 
 
@@ -224,15 +277,10 @@ class StaticScanner:
     def _scan_file(self, path: str, content: str, ext: str) -> list[PatternMatch]:
         matches: list[PatternMatch] = []
         in_test = _is_test_or_docs(path)
+        string_spans = None  # tokenized lazily, and at most once per file
 
         for pattern in self.patterns:
             if ext not in pattern.file_types:
-                continue
-
-            # Presence-based: extension is the signal
-            if pattern.name in ("pickle_checkpoint_detected", "binary_model_with_code"):
-                if not in_test:
-                    matches.append(self._presence_match(pattern, path, ext))
                 continue
 
             # Fix 5: smarter bat filtering
@@ -245,9 +293,17 @@ class StaticScanner:
             # alternative spellings of the same threat, so emitting one match
             # per regex both double-reports it in the UI and compounds the
             # score penalty. Report the earliest line instead.
+            spans = None
+            if pattern.prose_severity is not None and ext == ".py":
+                if string_spans is None:
+                    string_spans = _string_literal_spans(content)
+                spans = string_spans
+
             hits: list[PatternMatch] = []
             for regex in pattern.regexes:
-                hits.extend(self._regex_scan(content, regex, path, pattern, in_test))
+                hits.extend(
+                    self._regex_scan(content, regex, path, pattern, in_test, spans)
+                )
             if hits:
                 matches.append(min(hits, key=lambda m: m.line_number or 0))
 
@@ -257,6 +313,14 @@ class StaticScanner:
 
         return matches
 
+    def _as_prose(self, hit: PatternMatch, pattern: Pattern) -> PatternMatch:
+        """Re-rank a match that turned out to be inside a string literal."""
+        return hit.model_copy(update={
+            "severity": pattern.prose_severity,
+            "malware_grade": False,
+            "description": f"{pattern.description} (mentioned in text, not executed here)",
+        })
+
     def _presence_match(self, pattern: Pattern, path: str, ext: str) -> PatternMatch:
         return PatternMatch(
             category=pattern.category, pattern_name=pattern.name,
@@ -265,21 +329,30 @@ class StaticScanner:
             malware_grade=pattern.malware_grade,
         )
 
-    def _regex_scan(self, content, regex, path, pattern, in_test) -> list[PatternMatch]:
+    def _regex_scan(self, content, regex, path, pattern, in_test,
+                    string_spans=None) -> list[PatternMatch]:
         if in_test and pattern.severity < 90:
             return []
         matches = []
         try:
             for i, line in enumerate(content.splitlines(), start=1):
-                if re.search(regex, line, re.IGNORECASE):
-                    matches.append(PatternMatch(
-                        category=pattern.category, pattern_name=pattern.name,
-                        description=pattern.description, file_path=path,
-                        line_number=i, severity=pattern.severity,
-                        snippet=line.strip()[:200],
-                        malware_grade=pattern.malware_grade,
-                    ))
-                    break  # one hit per pattern per file
+                found = re.search(regex, line, re.IGNORECASE)
+                if not found:
+                    continue
+                hit = PatternMatch(
+                    category=pattern.category, pattern_name=pattern.name,
+                    description=pattern.description, file_path=path,
+                    line_number=i, severity=pattern.severity,
+                    snippet=line.strip()[:200],
+                    malware_grade=pattern.malware_grade,
+                )
+                # Column matters, not just the line: a call can sit on the same
+                # line as an unrelated string, as in
+                # `from_pretrained('o/m', trust_remote_code=True)`.
+                if string_spans is not None and _in_span(string_spans, i, found.start()):
+                    hit = self._as_prose(hit, pattern)
+                matches.append(hit)
+                break  # one hit per pattern per file
         except re.error as e:
             logger.warning(f"Bad regex {regex!r}: {e}")
         return matches
@@ -369,7 +442,7 @@ class StaticScanner:
 
 _WEIGHTS = {
     "hf_exploit": 1.4, "model_exploit": 1.3, "system_exec": 1.3,
-    "network": 1.2, "obfuscation": 1.1, "evasion": 1.0,
+    "supply_chain": 1.3, "network": 1.2, "obfuscation": 1.1, "evasion": 1.0,
     "file_behaviour": 0.6, "account": 0.5,
 }
 # A single finding may short-circuit the score only if it is malware-grade
