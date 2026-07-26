@@ -28,7 +28,8 @@ RepoGuard would have flagged it with a score of < 10 / 100.
 ## Stack
 
 - Backend: Python + FastAPI
-- AI layer: Claude API (model card analysis)
+- Scanning: regex pattern registry + Python AST analysis (no code execution)
+- AI layer: Claude API for model card analysis — planned, not yet wired
 - Frontend: React + Vite
 - Database: SQLite (dev) / PostgreSQL (prod)
 - Deploy: Railway or Render
@@ -52,14 +53,17 @@ npm run dev
 
 ```bash
 cd backend
-pytest tests/ -v
+pytest app/tests/ -v
 ```
 
 ## API
 
 ```
 POST /api/scan
-{ "url": "https://huggingface.co/owner/repo" }
+{ "repo_url": "https://huggingface.co/owner/repo" }
+
+GET  /api/scans?limit=20     # recent scan history
+GET  /api/health
 ```
 
 Returns a trust score (0-100), trust level (safe/suspicious/dangerous),
