@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from sqlalchemy import DateTime, Integer, String, Text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 
@@ -33,7 +33,19 @@ class ScanRecord(Base):
         Text
     )
 
+    files_scanned: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
+    )
+
+    findings = relationship(
+        "Finding",
+        back_populates="scan",
+        cascade="all, delete-orphan",
+        lazy="selectin",
     )
