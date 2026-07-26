@@ -38,6 +38,9 @@ class PatternMatch(BaseModel):
     line_number: int | None = None
     severity: int
     snippet: str | None = None
+    # Signals with no legitimate use in a model/library repo. Only these may
+    # short-circuit the trust score to "dangerous" — see calculate_trust_score.
+    malware_grade: bool = False
 
 
 # Fix 4: AccountInfo lives in scan.py — fetcher imports from here, no circular dep
