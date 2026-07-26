@@ -10,6 +10,9 @@ Orchestrates a full repo scan:
 import logging
 from datetime import datetime, timezone
 
+import httpx
+
+from app.core.exceptions import RepoGuardError
 from app.fetcher.fetcher import RepoFetcher
 from app.scanner.scan import PatternMatch, ScanResponse, ScanResult, TrustLevel
 from app.scanner.static_scanner import StaticScanner, calculate_trust_score
@@ -53,9 +56,22 @@ class ScanOrchestrator:
 
             return ScanResponse(success=True, result=result)
 
+        except RepoGuardError as e:
+            # Fetch/scan failures carry a message meant for the user — pass it
+            # through verbatim rather than burying it under "Scan failed:".
+            logger.warning(f"Scan aborted for {url}: {e}")
+            return ScanResponse(success=False, error=str(e))
+
         except ValueError as e:
             logger.warning(f"Validation error: {e}")
             return ScanResponse(success=False, error=str(e))
+
+        except httpx.RequestError as e:
+            logger.warning(f"Network error for {url}: {e}")
+            return ScanResponse(
+                success=False,
+                error="Could not reach GitHub/Hugging Face. Check your connection and try again.",
+            )
 
         except Exception as e:
             logger.exception(f"Scan failed for {url}")
@@ -100,7 +116,9 @@ class ScanOrchestrator:
         if not matches:
             return f"No malicious patterns detected in {repo}."
 
-        critical = [m for m in matches if m.severity >= 85]
+        # Must match the UI's severity chip threshold in App.jsx (sevLabel),
+        # or the summary says "Critical findings" next to a "HIGH" badge.
+        critical = [m for m in matches if m.severity >= 90]
         parts = [f"RepoGuard detected {len(matches)} suspicious signal(s)."]
 
         if trust_level == TrustLevel.DANGEROUS:

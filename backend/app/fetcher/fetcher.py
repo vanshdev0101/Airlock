@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import httpx
 
 from ..config import get_settings
+from ..core.exceptions import FetchError
 from ..scanner.scan import AccountInfo
 
 logger = logging.getLogger(__name__)
@@ -52,25 +53,33 @@ class RepoFetcher:
         owner, repo = info["owner"], info["repo"]
         repo_id = f"{owner}/{repo}"
 
-        # Try model → dataset → space in order
-        meta = {}
-        repo_type = "models"
+        # Try model → dataset → space in order. One request per type: the
+        # blobs=True response carries both the metadata and the `siblings`
+        # file list, so there is no need to fetch the endpoint twice.
+        meta = None
         for rtype in ("models", "datasets", "spaces"):
-            resp = await client.get(f"{self.hf_base}/{rtype}/{repo_id}")
+            resp = await client.get(
+                f"{self.hf_base}/{rtype}/{repo_id}",
+                params={"blobs": True},
+            )
             if resp.status_code == 200:
                 meta = resp.json()
-                repo_type = rtype
                 break
+            if resp.status_code == 429:
+                raise FetchError("Hugging Face rate limit hit. Wait a minute and try again.")
+            # 401/403 is not conclusive: Hugging Face returns it for gated,
+            # private *and* nonexistent repos so as not to leak existence.
+            # Keep trying the other repo types before giving up.
 
-        # Get file list — siblings key works for all repo types
-        files_resp = await client.get(
-            f"{self.hf_base}/{repo_type}/{repo_id}",
-            params={"blobs": True}
-        )
-        file_list = []
-        if files_resp.status_code == 200:
-            file_list = [s["rfilename"] for s in files_resp.json().get("siblings", [])]
+        # A repo we cannot read is not a repo we can vouch for. Never fall
+        # through to an empty file set — that would score a clean 100.
+        if meta is None:
+            raise FetchError(
+                f"Could not read '{repo_id}' on Hugging Face — it does not exist, "
+                "or it is private/gated. RepoGuard can only scan public repos."
+            )
 
+        file_list = [s["rfilename"] for s in meta.get("siblings", [])]
         scannable = [f for f in file_list if self._ext(f) in SCANNABLE_EXTENSIONS][:settings.max_files_per_scan]
 
         # Always try README
@@ -82,6 +91,7 @@ class RepoFetcher:
             client,
             {f: f"https://huggingface.co/{repo_id}/resolve/main/{f}" for f in scannable}
         )
+        self._require_readable_files(files_content, repo_id)
 
         author_info = await self._fetch_hf_author(client, owner)
         return {
@@ -100,18 +110,19 @@ class RepoFetcher:
 
         meta_resp = await client.get(
             f"{self.gh_base}/repos/{owner}/{repo}", headers=self.gh_headers)
-        meta = meta_resp.json() if meta_resp.status_code == 200 else {}
+        self._raise_for_github(meta_resp, f"{owner}/{repo}")
+        meta = meta_resp.json()
 
         tree_resp = await client.get(
             f"{self.gh_base}/repos/{owner}/{repo}/git/trees/HEAD",
             params={"recursive": "1"}, headers=self.gh_headers)
-        file_list = []
-        if tree_resp.status_code == 200:
-            file_list = [i["path"] for i in tree_resp.json().get("tree", []) if i["type"] == "blob"]
+        self._raise_for_github(tree_resp, f"{owner}/{repo}")
+        file_list = [i["path"] for i in tree_resp.json().get("tree", []) if i["type"] == "blob"]
 
         scannable = [f for f in file_list if self._ext(f) in SCANNABLE_EXTENSIONS][:settings.max_files_per_scan]
         base = f"https://raw.githubusercontent.com/{owner}/{repo}/HEAD"
         files_content = await self._download_many(client, {f: f"{base}/{f}" for f in scannable})
+        self._require_readable_files(files_content, f"{owner}/{repo}")
 
         user_resp = await client.get(f"{self.gh_base}/users/{owner}", headers=self.gh_headers)
         user_data = user_resp.json() if user_resp.status_code == 200 else {}
@@ -123,6 +134,34 @@ class RepoFetcher:
             "downloads": meta.get("stargazers_count", 0),
             "likes": meta.get("watchers_count", 0),
         }
+
+    def _raise_for_github(self, resp: httpx.Response, repo_id: str) -> None:
+        """Turn a non-200 GitHub response into a FetchError with a usable message."""
+        if resp.status_code == 200:
+            return
+        if resp.status_code == 404:
+            raise FetchError(
+                f"'{repo_id}' was not found on GitHub. "
+                "Check the spelling and that the repo is public."
+            )
+        if resp.status_code == 403 and resp.headers.get("x-ratelimit-remaining") == "0":
+            raise FetchError(
+                "GitHub rate limit hit. Set GITHUB_TOKEN in .env to raise the limit, "
+                "or wait a few minutes."
+            )
+        if resp.status_code in (401, 403):
+            raise FetchError(
+                f"'{repo_id}' is private — RepoGuard can only scan public repos."
+            )
+        raise FetchError(f"GitHub returned {resp.status_code} for '{repo_id}'.")
+
+    def _require_readable_files(self, files: dict[str, str], repo_id: str) -> None:
+        """A scan that read nothing proves nothing — refuse to score it as safe."""
+        if not files:
+            raise FetchError(
+                f"No readable source files found in '{repo_id}'. "
+                "RepoGuard cannot assess a repo it could not read."
+            )
 
     async def _download_many(self, client, url_map: dict[str, str]) -> dict[str, str]:
         async def fetch_one(filename, url):
