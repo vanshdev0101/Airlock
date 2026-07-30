@@ -37,7 +37,6 @@ export default function ScanForm({ url, onUrlChange, onSubmit, loading }) {
             inputMode="url"
             autoComplete="off"
             spellCheck="false"
-            placeholder="github.com/owner/repo  ·  huggingface.co/org/model"
             value={url}
             onChange={(e) => onUrlChange(e.target.value)}
             disabled={loading}
