@@ -1,4 +1,4 @@
-# RepoGuard 🛡️
+# Airlock🛡️
 
 AI-powered security scanner for Hugging Face and GitHub repositories.
 Detects malware, typosquatting, and supply chain attacks before you clone.
