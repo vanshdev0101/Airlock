@@ -85,6 +85,9 @@ logs/
 *.sqlite
 *.sqlite3
 
+# Chroma vector store (retrieval corpus, rebuilt on first use)
+.chroma/
+
 # ─────────────────────────────────────────────────────────────
 # Frontend / Node
 # ─────────────────────────────────────────────────────────────
