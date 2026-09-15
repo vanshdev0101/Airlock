@@ -58,7 +58,10 @@ executable format is worth a look.
 - Backend: Python + FastAPI
 - Scanning: regex pattern registry + Python AST + pickle opcode analysis
   (no code execution — nothing scanned is ever imported, loaded or unpickled)
-- AI layer: Claude API for model card analysis — planned, not yet wired
+- AI layer: Claude API (Haiku) flags social-engineering and bait patterns in
+  READMEs/model cards that regex can't catch — advisory signal, never a
+  standalone dangerous verdict; skipped automatically if `ANTHROPIC_API_KEY`
+  isn't set
 - Frontend: React + Vite
 - Database: SQLite (dev) / PostgreSQL (prod)
 - Deploy: Railway or Render

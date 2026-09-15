@@ -443,7 +443,7 @@ class StaticScanner:
 _WEIGHTS = {
     "hf_exploit": 1.4, "model_exploit": 1.3, "system_exec": 1.3,
     "supply_chain": 1.3, "network": 1.2, "obfuscation": 1.1, "evasion": 1.0,
-    "file_behaviour": 0.6, "account": 0.5,
+    "file_behaviour": 0.6, "account": 0.5, "ai_analysis": 0.8,
 }
 # A single finding may short-circuit the score only if it is malware-grade
 # (no legitimate use in a model/library repo) *and* severe. The old rule keyed

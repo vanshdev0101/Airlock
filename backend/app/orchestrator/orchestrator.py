@@ -14,6 +14,7 @@ import httpx
 
 from app.core.exceptions import RepoGuardError
 from app.fetcher.fetcher import RepoFetcher
+from app.scanner.ai_analyzer import analyze_model_card
 from app.scanner.dependency_scanner import scan_dependencies
 from app.scanner.pickle_scanner import check_weight_formats, scan_pickle_streams
 from app.scanner.scan import PatternMatch, ScanResponse, ScanResult, TrustLevel
@@ -47,6 +48,13 @@ class ScanOrchestrator:
             matches.extend(check_weight_formats(repo_data.get("all_files") or []))
 
             matches.extend(self._account_signals(repo_data))
+
+            # AI layer is advisory and best-effort: a Claude outage or a
+            # missing API key must never fail the scan itself.
+            try:
+                matches.extend(await analyze_model_card(repo_data["repo_name"], repo_data["files"]))
+            except Exception:
+                logger.exception(f"AI model card analysis failed for {url}")
 
             score = calculate_trust_score(matches)
             trust_level = self._score_to_level(score)
